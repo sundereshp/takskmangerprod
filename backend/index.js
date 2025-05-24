@@ -16,21 +16,22 @@ app.use((req, res, next) => {
 
 // In-memory storage
 let projects = [];
+let globalTaskId = 1; // Global task ID counter
 
-// Helper function to reassign task IDs sequentially
-const reassignTaskIds = () => {
-    let taskId = 1;
-    projects.forEach(project => {
-        project.tasks.forEach(task => {
-            task.id = taskId++;
-        });
-    });
+// Helper function to get next task ID
+const getNextTaskId = () => {
+    return globalTaskId++;
 };
 
 // GET all projects
 app.get('/api/projects', (req, res) => {
     console.log('GET /api/projects - Returning projects:', projects);
-    res.json(projects);
+    // Return projects without tasks array to match desired format
+    const projectsWithoutTasks = projects.map(project => {
+        const { tasks, ...projectWithoutTasks } = project;
+        return projectWithoutTasks;
+    });
+    res.json(projectsWithoutTasks);
 });
 
 // GET single project
@@ -58,7 +59,6 @@ app.post('/api/projects', (req, res) => {
 
     const { description,
         userID, name, startDate, endDate,
-        
         estHours = 0, actHours = 0, wsID
     } = req.body;
 
@@ -87,7 +87,9 @@ app.post('/api/projects', (req, res) => {
     projects.push(newProject);
     console.log('Projects after addition:', projects);
 
-    res.status(201).json(newProject);
+    // Return project without tasks to match desired format
+    const { tasks, ...projectResponse } = newProject;
+    res.status(201).json(projectResponse);
 });
 
 // PATCH update project
@@ -121,7 +123,10 @@ app.patch('/api/projects/:id', (req, res) => {
     };
 
     projects[projectIndex] = updatedProject;
-    res.json(updatedProject);
+    
+    // Return project without tasks to match desired format
+    const { tasks, ...projectResponse } = updatedProject;
+    res.json(projectResponse);
 });
 
 // DELETE project
@@ -144,15 +149,14 @@ app.get('/api/tasks', (req, res) => {
 });
 
 // POST create new task (including subtasks)
-// POST /api/tasks endpoint
 app.post('/api/tasks', (req, res) => {
     console.log('POST /api/tasks - Received body:', req.body);
 
-    const { description,
+    const { description = "",
         wsID, userID, projectID, name,
         taskLevel = 1, status = 'todo', parentID = 0,
         assignee1ID = 0, assignee2ID = 0, assignee3ID = 0,
-        estHours = 0, estPrevHours = [], actHours = 0,
+        estHours = 0, estPrevHours, actHours = 0,
         isExceeded = 0, info = {}, taskType = 'task'
     } = req.body;
 
@@ -161,8 +165,11 @@ app.post('/api/tasks', (req, res) => {
         return res.status(404).json({ error: 'Project not found' });
     }
 
+    // Use global task ID
+    const taskId = getNextTaskId();
+
     const newTask = {
-        id: project.tasks.length > 0 ? Math.max(...project.tasks.map(t => t.id)) + 1 : 1,
+        id: taskId,
         wsID: parseInt(wsID),
         userID: parseInt(userID),
         projectID: parseInt(projectID),
@@ -170,7 +177,7 @@ app.post('/api/tasks', (req, res) => {
         description,
         taskLevel,
         status,
-        parentID: parseInt(parentID),
+        parentID: taskLevel === 1 ? parseInt(projectID) : parseInt(parentID),
         level1ID: 0,
         level2ID: 0,
         level3ID: 0,
@@ -179,16 +186,17 @@ app.post('/api/tasks', (req, res) => {
         assignee2ID: parseInt(assignee2ID),
         assignee3ID: parseInt(assignee3ID),
         estHours: parseFloat(estHours),
-        estPrevHours,
+        estPrevHours: taskLevel === 2 ? [] : (estPrevHours !== undefined ? estPrevHours : 0),
         actHours: parseFloat(actHours),
         isExceeded,
         priority: 'low',
         info,
-        taskType: 'task',
+        taskType,
         dueDate: null,
-        comments: '',
+        comments: "",
         createdAt: new Date().toISOString(),
-        modifiedAt: new Date().toISOString()
+        modifiedAt: new Date().toISOString(),
+        expanded: true
     };
 
     // Handle hierarchy levels
@@ -221,7 +229,6 @@ app.post('/api/tasks', (req, res) => {
     res.status(201).json(newTask);
 });
 
-
 // GET tasks for a specific project
 app.get('/api/tasks/project/:projectId', (req, res) => {
     const projectId = parseInt(req.params.projectId);
@@ -253,11 +260,18 @@ app.put('/api/tasks/:id', (req, res) => {
         modifiedAt: new Date().toISOString()
     };
 
-    // Handle estHours and estPrevHours for subtasks and their descendants
-    if (updates.estHours !== undefined && currentTask.taskLevel > 1) {
+    // Handle estHours and estPrevHours based on task level
+    if (updates.estHours !== undefined) {
         updatedTask.estHours = parseFloat(updates.estHours);
-        // Store previous estimate as a single number
-        updatedTask.estPrevHours = currentTask.estHours || 0;
+        
+        // For subtasks (level 2), use array format
+        if (currentTask.taskLevel === 2) {
+            updatedTask.estPrevHours = Array.isArray(currentTask.estPrevHours) ? 
+                currentTask.estPrevHours : [];
+        } else {
+            // For other levels, store as single number
+            updatedTask.estPrevHours = currentTask.estHours || 0;
+        }
     }
 
     // Validation
