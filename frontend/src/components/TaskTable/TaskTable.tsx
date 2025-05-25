@@ -618,7 +618,6 @@ export function TaskTable() {
                   {/* Show NewItemRow if it matches the current status */}
                   {newItemState?.type === 'task' && newItemState.status === status && (
                     <tr>
-                      <td colSpan={8}>
                         <NewItemRow
                           type="task"
                           name={newItemState.name}
@@ -637,7 +636,6 @@ export function TaskTable() {
                           setNewItemState={setNewItemState}
                           toast={toast}
                         />
-                      </td>
                     </tr>
                   )}
 
