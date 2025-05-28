@@ -326,7 +326,7 @@ app.delete('/su/backend/tasks/:id', async (req, res) => {
 });
 
 // Start server
-app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-    console.log(`API base URL: http://localhost:${PORT}/su/backend`);
+app.listen(PORT, '0.0.0.0',() => {
+    console.log(`Server running on http://0.0.0.0:${PORT}`);
+    console.log(`API base URL: http://0.0.0.0:${PORT}/su/backend`);
 });
