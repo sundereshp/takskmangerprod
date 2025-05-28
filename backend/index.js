@@ -6,7 +6,7 @@ const mysql = require('mysql2/promise');
 const app = express();
 const PORT = process.env.PORT || 3103;
 const corsOptions = {
-    origin: ['http://localhost:8080', 'http://46.28.44.5:3103'],
+    origin: ['http://localhost:8080', 'http://46.28.44.5:3103', 'http://localhost:8081'],
     optionsSuccessStatus: 200
 };
 
