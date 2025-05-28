@@ -5,13 +5,25 @@ const mysql = require('mysql2/promise');
 
 const app = express();
 const PORT = process.env.PORT || 3103;
+
+// Updated CORS configuration to include your local IP
 const corsOptions = {
-    origin: ['http://localhost:8080', 'http://46.28.44.5:3103', 'http://localhost:8081'],
-    optionsSuccessStatus: 200
+    origin: [
+        'http://localhost:8080', 
+        'http://localhost:8081',
+        'http://46.28.44.5:3103', 
+        'http://192.168.1.10:8081',  // Add your local IP
+        'http://127.0.0.1:8081'      // Add localhost alternative
+    ],
+    credentials: true,
+    optionsSuccessStatus: 200,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
 };
 
 app.use(cors(corsOptions));
 app.use(express.json());
+
 // Create MySQL connection pool
 const pool = mysql.createPool({
     host: process.env.DB_HOST,
@@ -38,10 +50,11 @@ async function testConnection() {
 
 testConnection();
 
-
 // Add logging middleware
 app.use((req, res, next) => {
     console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+    console.log('Request body:', req.body);
+    console.log('Request headers:', req.headers);
     next();
 });
 
@@ -70,11 +83,12 @@ app.get('/su/backend/projects/:id', async (req, res) => {
     }
 });
 
-// POST create new project
+// POST create new project - Updated to handle optional fields
 app.post('/su/backend/projects', async (req, res) => {
     console.log('POST /su/backend/projects - Received body:', req.body);
 
-    const requiredFields = ['userID', 'name', 'description', 'startDate', 'endDate', 'estHours', 'actHours', 'wsID'];
+    // Only require essential fields, provide defaults for others
+    const requiredFields = ['userID', 'name', 'wsID'];
     const missing = requiredFields.filter(field => req.body[field] === undefined || req.body[field] === null);
 
     if (missing.length > 0) {
@@ -85,7 +99,16 @@ app.post('/su/backend/projects', async (req, res) => {
     }
 
     try {
-        const { userID, name, description, startDate, endDate, estHours, actHours, wsID } = req.body;
+        const { 
+            userID, 
+            name, 
+            description = '', 
+            startDate, 
+            endDate, 
+            estHours = 0, 
+            actHours = 0, 
+            wsID 
+        } = req.body;
 
         const [result] = await pool.query(
             'INSERT INTO projects (userID, name, description, startDate, endDate, estHours, actHours, wsID) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
@@ -97,7 +120,7 @@ app.post('/su/backend/projects', async (req, res) => {
         res.status(201).json(newProject[0]);
     } catch (error) {
         console.error('Error creating project:', error);
-        res.status(500).json({ error: 'Database error' });
+        res.status(500).json({ error: 'Database error', details: error.message });
     }
 });
 
@@ -176,8 +199,8 @@ app.get('/su/backend/tasks/:id', async (req, res) => {
     }
 });
 
-// GET tasks by project
-app.get('/su/backend/projects/:projectId/tasks', async (req, res) => {
+// GET tasks by project - Fixed endpoint
+app.get('/su/backend/tasks/project/:projectId', async (req, res) => {
     try {
         const [rows] = await pool.query('SELECT * FROM tasks WHERE projectID = ? ORDER BY createdAt DESC', [req.params.projectId]);
         res.json(rows);
@@ -187,11 +210,12 @@ app.get('/su/backend/projects/:projectId/tasks', async (req, res) => {
     }
 });
 
-// POST create new task
+// POST create new task - Updated to handle optional fields
 app.post('/su/backend/tasks', async (req, res) => {
     console.log('POST /su/backend/tasks - Received body:', req.body);
 
-    const requiredFields = ['wsID', 'userID', 'projectID', 'name', 'description', 'taskLevel', 'parentID', 'level1ID', 'level2ID', 'level3ID', 'level4ID', 'assignee1ID', 'assignee2ID', 'assignee3ID', 'estHours', 'estPrevHours', 'actHours', 'isExeceeded', 'info'];
+    // Only require essential fields
+    const requiredFields = ['wsID', 'userID', 'projectID', 'name', 'taskLevel'];
     const missing = requiredFields.filter(field => req.body[field] === undefined || req.body[field] === null);
 
     if (missing.length > 0) {
@@ -204,22 +228,22 @@ app.post('/su/backend/tasks', async (req, res) => {
             userID,
             projectID,
             name,
-            description,
+            description = '',
             taskLevel,
             status = 'TODO',
-            parentID,
-            level1ID,
-            level2ID,
-            level3ID,
-            level4ID,
-            assignee1ID,
-            assignee2ID,
-            assignee3ID,
-            estHours,
-            estPrevHours,
-            actHours,
-            isExeceeded,
-            info
+            parentID = 0,
+            level1ID = 0,
+            level2ID = 0,
+            level3ID = 0,
+            level4ID = 0,
+            assignee1ID = 0,
+            assignee2ID = 0,
+            assignee3ID = 0,
+            estHours = 0,
+            estPrevHours = {},
+            actHours = 0,
+            isExeceeded = 0,
+            info = {}
         } = req.body;
 
         // Validate status enum
@@ -228,18 +252,9 @@ app.post('/su/backend/tasks', async (req, res) => {
             return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
         }
 
-        // Validate JSON fields
-        let parsedEstPrevHours, parsedInfo;
-        try {
-            parsedEstPrevHours = typeof estPrevHours === 'string' ? JSON.parse(estPrevHours) : estPrevHours;
-            parsedInfo = typeof info === 'string' ? JSON.parse(info) : info;
-        } catch (jsonError) {
-            return res.status(400).json({ error: 'Invalid JSON format for estPrevHours or info fields' });
-        }
-
         const [result] = await pool.query(
             'INSERT INTO tasks (wsID, userID, projectID, name, description, taskLevel, status, parentID, level1ID, level2ID, level3ID, level4ID, assignee1ID, assignee2ID, assignee3ID, estHours, estPrevHours, actHours, isExeceeded, info) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [wsID, userID, projectID, name, description, taskLevel, status, parentID, level1ID, level2ID, level3ID, level4ID, assignee1ID, assignee2ID, assignee3ID, estHours, JSON.stringify(parsedEstPrevHours), actHours, isExeceeded, JSON.stringify(parsedInfo)]
+            [wsID, userID, projectID, name, description, taskLevel, status, parentID, level1ID, level2ID, level3ID, level4ID, assignee1ID, assignee2ID, assignee3ID, estHours, JSON.stringify(estPrevHours), actHours, isExeceeded, JSON.stringify(info)]
         );
 
         const [newTask] = await pool.query('SELECT * FROM tasks WHERE id = ?', [result.insertId]);
@@ -247,7 +262,7 @@ app.post('/su/backend/tasks', async (req, res) => {
         res.status(201).json(newTask[0]);
     } catch (error) {
         console.error('Error creating task:', error);
-        res.status(500).json({ error: 'Database error' });
+        res.status(500).json({ error: 'Database error', details: error.message });
     }
 });
 
